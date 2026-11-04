@@ -1,0 +1,39 @@
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
+const db = require('./backend/database');
+
+(async () => {
+  const phone = '9' + Date.now().toString().slice(-9);
+  const hash = await bcrypt.hash('Password123!', 12);
+
+  const userResult = db.prepare(
+    'INSERT INTO users (name, email, phonenumber, password) VALUES (?, ?, ?, ?)'
+  ).run('Live User', '', phone, hash);
+
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userResult.lastInsertRowid);
+  const token = jwt.sign(
+    { id: user.id, email: user.email || '', phonenumber: user.phonenumber || '' },
+    'development_secret_key_for_local_only_123456',
+    { expiresIn: '1h' }
+  );
+
+  const response = await fetch('http://localhost:5000/api/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: 'Bearer ' + token,
+    },
+    body: JSON.stringify({ message: 'Validation message' }),
+  });
+
+  const body = await response.text();
+  console.log('status', response.status);
+  console.log('body', body);
+  console.log('messages count', db.prepare('SELECT COUNT(*) AS c FROM messages').get().c);
+  console.log('latest', JSON.stringify(db.prepare('SELECT id, user_id, message, created_at FROM messages ORDER BY id DESC LIMIT 1').get(), null, 2));
+
+  db.close();
+})().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

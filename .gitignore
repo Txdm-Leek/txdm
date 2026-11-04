@@ -12,10 +12,10 @@ dist-ssr
 *.local
 
 # Environment and secrets
-.env
-.env.*
-backend/.env
-!backend/.env.example
+#.env
+#.env.*
+#backend/.env
+#!backend/.env.example
 
 # Editor
 .vscode/

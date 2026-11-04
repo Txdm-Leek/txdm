@@ -17,7 +17,8 @@ function App() {
 
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
- const params = new URLSearchParams(window.location.search);
+  const apiBaseUrl = import.meta.env.VITE_API_URL || "http://localhost:5000";
+  const params = new URLSearchParams(window.location.search);
 
 const [authPage, setAuthPage] = useState<AuthPage>(
     params.has("verifyToken")
@@ -59,7 +60,7 @@ const [authPage, setAuthPage] = useState<AuthPage>(
 
     try {
       const response = await fetch(
-        `http://localhost:5000/api/auth/${isRegister ? "register" : "login"}`,
+        `${apiBaseUrl}/api/auth/${isRegister ? "register" : "login"}`,
         {
           method: "POST",
           headers: {
@@ -104,7 +105,7 @@ setUser(data.user);
       }
 
       try {
-        const response = await fetch("http://localhost:5000/api/auth/me", {
+        const response = await fetch(`${apiBaseUrl}/api/auth/me`, {
           headers: {
             Authorization: `Bearer ${token}`,
           },

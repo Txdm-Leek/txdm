@@ -20,7 +20,7 @@ if (JWT_SECRET.length < 32) {
 
 const allowedOrigins = (
     process.env.FRONTEND_URL || "http://localhost:5173"
-).split(",").map(origin => origin.trim());
+).split(",").map(origin => origin.trim().replace(/\/+$/, ""));
 
 app.use(cors({
     origin: allowedOrigins,

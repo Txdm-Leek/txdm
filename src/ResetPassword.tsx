@@ -11,6 +11,7 @@ function ResetPassword({ onBack }: ResetPasswordProps) {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
+  const apiBaseUrl = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -38,7 +39,7 @@ function ResetPassword({ onBack }: ResetPasswordProps) {
 
     try {
       const response = await fetch(
-        "http://localhost:5000/api/auth/reset-password",
+        `${apiBaseUrl}/api/auth/reset-password`,
         {
           method: "POST",
           headers: {

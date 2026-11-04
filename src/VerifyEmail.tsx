@@ -5,6 +5,7 @@ function VerifyEmail() {
     const [message, setMessage] = useState("Verifying your email...");
     const [loading, setLoading] = useState(true);
     const [success, setSuccess] = useState(false);
+    const apiBaseUrl = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
     useEffect(() => {
         const params = new URLSearchParams(window.location.search);
@@ -19,8 +20,7 @@ function VerifyEmail() {
         const verifyEmail = async () => {
             try {
                 const response = await fetch(
-                    "http://localhost:5000/api/auth/verify-email?token=" +
-                    encodeURIComponent(token)
+                    `${apiBaseUrl}/api/auth/verify-email?token=${encodeURIComponent(token)}`
                 );
 
                 const data = await response.json();

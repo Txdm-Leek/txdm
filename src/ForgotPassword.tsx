@@ -9,6 +9,7 @@ function ForgotPassword({ onBack }: ForgotPasswordProps) {
   const [email, setEmail] = useState("");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
+  const apiBaseUrl = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -18,7 +19,7 @@ function ForgotPassword({ onBack }: ForgotPasswordProps) {
 
     try {
       const response = await fetch(
-        "http://localhost:5000/api/auth/forgot-password",
+        `${apiBaseUrl}/api/auth/forgot-password`,
         {
           method: "POST",
           headers: {

@@ -1,10 +1,24 @@
-const db = require("./database");
+const path = require("path");
 
-const users = db.prepare(`
-    SELECT id, name, email, created_at
+require("dotenv").config({
+  path: path.resolve(__dirname, ".env")
+});
+
+const { db } = require("./database");
+
+async function showUsers() {
+  const result = await db.query(`
+    SELECT id, name, email, phonenumber, is_verified, created_at
     FROM users
-`).all();
+    ORDER BY id ASC
+  `);
 
-console.table(users);
+  console.table(result.rows);
+}
 
-db.close();
+showUsers()
+  .catch(error => {
+    console.error("Could not load users:", error.message);
+    process.exitCode = 1;
+  })
+  .finally(() => db.end());

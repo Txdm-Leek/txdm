@@ -1,11 +1,12 @@
 
 import { useEffect, useState } from "react";
+import { getApiBaseUrl } from "./api";
 
 function VerifyEmail() {
     const [message, setMessage] = useState("Verifying your email...");
     const [loading, setLoading] = useState(true);
     const [success, setSuccess] = useState(false);
-    const apiBaseUrl = import.meta.env.VITE_API_URL || "http://localhost:5000";
+    const apiBaseUrl = getApiBaseUrl();
 
     useEffect(() => {
         const params = new URLSearchParams(window.location.search);

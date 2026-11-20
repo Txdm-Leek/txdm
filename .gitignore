@@ -12,10 +12,14 @@ dist-ssr
 *.local
 
 # Environment and secrets
-#.env
-#.env.*
-#backend/.env
-#!backend/.env.example
+.env
+.env.*
+backend/.env
+#git remote remove orgin
+git remote remove origin
+git remote add origin https://github.com/<your-username>/<your-repo-name>.git
+git branch -M main
+git push -u origin main!backend/.env.example
 
 # Editor
 .vscode/

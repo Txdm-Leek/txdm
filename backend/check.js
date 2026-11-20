@@ -20,7 +20,7 @@ const db = require('./database');
     { expiresIn: '1h' }
   );
 
-  const res = await fetch('http://localhost:5000/api/messages', {
+  const res = await fetch('https://react-backend-gqnc.onrender.com', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

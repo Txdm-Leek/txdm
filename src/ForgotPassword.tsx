@@ -1,5 +1,6 @@
 
 import { useState, type FormEvent } from "react";
+import { getApiBaseUrl } from "./api";
 
 interface ForgotPasswordProps {
   onBack: () => void;
@@ -9,7 +10,7 @@ function ForgotPassword({ onBack }: ForgotPasswordProps) {
   const [email, setEmail] = useState("");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
-  const apiBaseUrl = import.meta.env.VITE_API_URL || "http://localhost:5000";
+  const apiBaseUrl = getApiBaseUrl();
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();

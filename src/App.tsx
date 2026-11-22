@@ -4,6 +4,7 @@ import "./App.css";
 import VerifyEmail from "./VerifyEmail";
 import ForgotPassword from "./ForgotPassword";
 import ResetPassword from "./ResetPassword";
+import { getApiBaseUrl } from "./api";
 
 function App() {
   interface User {
@@ -17,7 +18,7 @@ function App() {
 
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const apiBaseUrl = import.meta.env.VITE_API_URL || "http://localhost:5000";
+  const apiBaseUrl = getApiBaseUrl();
   const params = new URLSearchParams(window.location.search);
 
 const [authPage, setAuthPage] = useState<AuthPage>(

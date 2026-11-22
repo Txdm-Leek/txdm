@@ -1,11 +1,12 @@
 import { useState } from "react";
+import { getApiBaseUrl } from "./api";
 
 export default function MessageForm() {
   const [message, setMessage] = useState("");
   const [status, setStatus] = useState("");
   const [saving, setSaving] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const apiBaseUrl = import.meta.env.VITE_API_URL || "http://localhost:5000";
+  const apiBaseUrl = getApiBaseUrl();
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();

@@ -1,39 +1,77 @@
 const crypto = require("crypto");
 const nodemailer = require("nodemailer");
 const path = require("path");
-require("dotenv").config({ path: path.resolve(__dirname, ".env") });
+
+require("dotenv").config({
+    path: path.resolve(__dirname, ".env")
+});
 
 const express = require("express");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const cors = require("cors");
-const db = require("./database");
+
+const { db, initDb } = require("./database");
 
 const app = express();
 
 const PORT = process.env.PORT || 5000;
-const JWT_SECRET = process.env.JWT_SECRET || "development_secret_key_for_local_only_123456";
+const JWT_SECRET = process.env.JWT_SECRET ||
+    "development_secret_key_for_local_only_123456";
 
 if (JWT_SECRET.length < 32) {
-    console.warn("JWT_SECRET is short; using a fallback development secret.");
+    throw new Error("JWT_SECRET must be at least 32 characters.");
 }
 
 const allowedOrigins = (
-    process.env.FRONTEND_URL || "http://localhost:5173"
-).split(",").map(origin => origin.trim().replace(/\/+$/, ""));
+    [
+        process.env.FRONTEND_URL,
+        "http://localhost:5173",
+        "http://localhost:5174",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:5174",
+        "https://7q5j8szg-5173.eun1.devtunnels.ms",
+        "https://7q5j8szg-5000.eun1.devtunnels.ms"
+    ]
+        .filter(Boolean)
+        .map(origin => origin.trim().replace(/\/+$/, ""))
+);
+
+const allowedOriginSet = new Set(allowedOrigins);
 
 app.use(cors({
-    origin: allowedOrigins,
+    origin(origin, callback) {
+        if (!origin) {
+            return callback(null, true);
+        }
+
+        let normalizedOrigin;
+        try {
+            normalizedOrigin = new URL(origin).origin;
+        } catch {
+            return callback(new Error("Invalid CORS origin."));
+        }
+
+        const isLocalOrigin = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(normalizedOrigin);
+        const isDevTunnelOrigin = /^https:\/\/[^/]+\.devtunnels\.ms$/i.test(normalizedOrigin);
+
+        if (allowedOriginSet.has(normalizedOrigin) || isLocalOrigin || isDevTunnelOrigin) {
+            callback(null, true);
+        } else {
+            callback(new Error("Origin is not allowed by CORS."));
+        }
+    },
     credentials: true
 }));
-
 app.use(express.json({ limit: "10kb" }));
+
 app.get("/", (req, res) => {
     res.json({
         message: "Backend API is running successfully!"
     });
 });
-// Create an authentication token
+
+// CREATE AUTHENTICATION TOKEN
 function createToken(user) {
     return jwt.sign(
         {
@@ -46,7 +84,7 @@ function createToken(user) {
     );
 }
 
-// Middleware to protect private endpoints
+// AUTHENTICATION MIDDLEWARE
 function authenticateToken(req, res, next) {
     const authHeader = req.headers.authorization;
 
@@ -56,10 +94,12 @@ function authenticateToken(req, res, next) {
         });
     }
 
-    const token = authHeader.split(" ")[1];
-
     try {
-        req.user = jwt.verify(token, JWT_SECRET);
+        req.user = jwt.verify(
+            authHeader.split(" ")[1],
+            JWT_SECRET
+        );
+
         next();
     } catch {
         return res.status(401).json({
@@ -68,14 +108,37 @@ function authenticateToken(req, res, next) {
     }
 }
 
+// EMAIL TRANSPORTER
+const transporter = nodemailer.createTransport({
+    host: process.env.EMAIL_HOST,
+    port: Number(process.env.EMAIL_PORT || 465),
+    secure: process.env.EMAIL_SECURE === "true",
+    auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASSWORD
+    }
+});
+
 // REGISTER
 app.post("/api/auth/register", async (req, res) => {
     try {
-        const rawEmailInput = typeof req.body.email === "string" ? req.body.email : "";
-        const rawPhoneInput = typeof req.body.phonenumber === "string" ? req.body.phonenumber : "";
-        const legacyIdentifier = typeof req.body.identifier === "string" ? req.body.identifier : "";
-        const rawEmail = rawEmailInput || (legacyIdentifier.includes("@") ? legacyIdentifier : "");
-        const rawPhone = rawPhoneInput || (!legacyIdentifier.includes("@") ? legacyIdentifier : "");
+        const rawEmailInput =
+            typeof req.body.email === "string" ? req.body.email : "";
+
+        const rawPhoneInput =
+            typeof req.body.phonenumber === "string"
+                ? req.body.phonenumber : "";
+
+        const legacyIdentifier =
+            typeof req.body.identifier === "string"
+                ? req.body.identifier : "";
+
+        const rawEmail = rawEmailInput ||
+            (legacyIdentifier.includes("@") ? legacyIdentifier : "");
+
+        const rawPhone = rawPhoneInput ||
+            (!legacyIdentifier.includes("@") ? legacyIdentifier : "");
+
         const { name, password } = req.body;
 
         if (
@@ -98,13 +161,9 @@ app.post("/api/auth/register", async (req, res) => {
             });
         }
 
-        if (!cleanPhone && !cleanEmail) {
-            return res.status(400).json({
-                message: "Phone number or email is required."
-            });
-        }
-
-        if (cleanPhone && (cleanPhone.length < 7 || cleanPhone.length > 20)) {
+        if (cleanPhone && (
+            cleanPhone.length < 7 || cleanPhone.length > 20
+        )) {
             return res.status(400).json({
                 message: "Enter a valid phone number."
             });
@@ -119,25 +178,20 @@ app.post("/api/auth/register", async (req, res) => {
             });
         }
 
-        if (password.length < 8 || Buffer.byteLength(password, "utf8") > 72) {
+        if (password.length < 8 ||
+            Buffer.byteLength(password, "utf8") > 72) {
             return res.status(400).json({
                 message: "Password must be at least 8 characters and no more than 72 bytes."
             });
         }
 
-       const existingUser = db.prepare(`
-    SELECT id FROM users
-    WHERE (phonenumber = ? AND ? <> '')
-       OR (email = ? AND ? <> '')
-`).get(cleanPhone, cleanPhone, cleanEmail, cleanEmail);
-console.log("[REGISTER] Submitted:", {
-    email: cleanEmail,
-    phone: cleanPhone
-});
+        const existingUser = await db.query(`
+            SELECT id FROM users
+            WHERE (phonenumber = $1 AND $1 <> '')
+               OR (email = $2 AND $2 <> '')
+        `, [cleanPhone, cleanEmail]);
 
-console.log("[REGISTER] Existing user:", existingUser || "NONE");
-
-        if (existingUser) {
+        if (existingUser.rows.length > 0) {
             return res.status(409).json({
                 message: "An account with this phone number or email already exists."
             });
@@ -145,50 +199,47 @@ console.log("[REGISTER] Existing user:", existingUser || "NONE");
 
         const hashedPassword = await bcrypt.hash(password, 12);
 
-   const isEmailRegistration = Boolean(cleanEmail);
+        const isEmailRegistration = Boolean(cleanEmail);
+        const isVerified = isEmailRegistration ? 0 : 1;
 
-// Email registrations must verify their email.
-// Phone-only registrations are automatically verified.
-const isVerified = isEmailRegistration ? 0 : 1;
+        let verificationToken = null;
 
-// Generate a secure verification token.
-let verificationToken = null;
+        if (isEmailRegistration) {
+            verificationToken = crypto.randomBytes(32).toString("hex");
+        }
 
-if (isEmailRegistration) {
-    verificationToken = crypto.randomBytes(32).toString("hex");
-}
+        const result = await db.query(`
+            INSERT INTO users
+                (name, email, phonenumber, password, is_verified)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id
+        `, [
+            cleanName,
+            cleanEmail || "",
+            cleanPhone || null,
+            hashedPassword,
+            isVerified
+        ]);
 
-const result = db.prepare(`
-    INSERT INTO users (name, email, phonenumber, password, is_verified)
-    VALUES (?, ?, ?, ?, ?)
-`).run(
-    cleanName,
-    cleanEmail || "",
-    cleanPhone || null,
-    hashedPassword,
-    isVerified
-);
+        const userId = result.rows[0].id;
 
-const userId = result.lastInsertRowid;
+        if (isEmailRegistration) {
+            const tokenHash = crypto
+                .createHash("sha256")
+                .update(verificationToken)
+                .digest("hex");
 
-// Create a hashed verification token in the database.
-if (isEmailRegistration) {
-    const tokenHash = crypto
-        .createHash("sha256")
-        .update(verificationToken)
-        .digest("hex");
+            const expiresAt = Date.now() + 24 * 60 * 60 * 1000;
 
-    const expiresAt = Date.now() + 24 * 60 * 60 * 1000;
-
-    db.prepare(`
-        INSERT INTO email_verification_tokens
-        (user_id, token_hash, expires_at)
-        VALUES (?, ?, ?)
-    `).run(userId, tokenHash, expiresAt);
-}
+            await db.query(`
+                INSERT INTO email_verification_tokens
+                    (user_id, token_hash, expires_at)
+                VALUES ($1, $2, $3)
+            `, [userId, tokenHash, expiresAt]);
+        }
 
         const user = {
-            id: Number(result.lastInsertRowid),
+            id: userId,
             name: cleanName,
             email: cleanEmail || "",
             phonenumber: cleanPhone
@@ -203,96 +254,88 @@ if (isEmailRegistration) {
         });
 
     } catch (error) {
-        console.error("[REGISTER ERROR]", {
-    code: error.code,
-    message: error.message,
-    stack: error.stack
-});
-        if (error.code === "SQLITE_CONSTRAINT_UNIQUE") {
+        console.error("[REGISTER ERROR]", error);
+
+        if (error.code === "23505") {
             return res.status(409).json({
                 message: "An account with this phone number or email already exists."
             });
         }
 
-        console.error("Registration error:", error.message);
-
         return res.status(500).json({
             message: "An unexpected server error occurred."
         });
     }
-    
 });
-// Verify user's email address
-app.get("/api/auth/verify-email", (req, res) => {
+
+// VERIFY EMAIL
+app.get("/api/auth/verify-email", async (req, res) => {
     try {
         const token = req.query.token;
 
-        // Check that the token has the expected format.
-        if (typeof token !== "string" || !/^[a-f0-9]{64}$/i.test(token)) {
+        if (typeof token !== "string" ||
+            !/^[a-f0-9]{64}$/i.test(token)) {
             return res.status(400).json({
                 success: false,
                 message: "Invalid verification link."
             });
         }
 
-        // Hash the token before searching the database.
         const tokenHash = crypto
             .createHash("sha256")
             .update(token)
             .digest("hex");
 
-        // Find a valid, unused, unexpired token.
-        const verification = db.prepare(`
-            SELECT user_id
-            FROM email_verification_tokens
-            WHERE token_hash = ?
-              AND used = 0
-              AND expires_at > ?
-        `).get(tokenHash, Date.now());
+        const client = await db.connect();
 
-        if (!verification) {
-            return res.status(400).json({
-                success: false,
-                message: "This verification link is invalid, expired, or already used."
-            });
-        }
+        try {
+            await client.query("BEGIN");
 
-        // Verify the email and mark the token as used together.
-        const verifyTransaction = db.transaction(() => {
-            const result = db.prepare(`
-                UPDATE email_verification_tokens
-                SET used = 1
-                WHERE token_hash = ?
+            const verification = await client.query(`
+                SELECT user_id
+                FROM email_verification_tokens
+                WHERE token_hash = $1
                   AND used = 0
-                  AND expires_at > ?
-            `).run(tokenHash, Date.now());
+                  AND expires_at > $2
+                FOR UPDATE
+            `, [tokenHash, Date.now()]);
 
-            if (result.changes !== 1) {
-                return false;
+            if (verification.rows.length === 0) {
+                await client.query("ROLLBACK");
+
+                return res.status(400).json({
+                    success: false,
+                    message: "This verification link is invalid, expired, or already used."
+                });
             }
 
-            db.prepare(`
+            const userId = verification.rows[0].user_id;
+
+            await client.query(`
+                UPDATE email_verification_tokens
+                SET used = 1
+                WHERE token_hash = $1
+            `, [tokenHash]);
+
+            await client.query(`
                 UPDATE users
                 SET is_verified = 1
-                WHERE id = ?
-            `).run(verification.user_id);
+                WHERE id = $1
+            `, [userId]);
 
-            return true;
-        });
+            await client.query("COMMIT");
 
-        const verified = verifyTransaction();
-
-        if (!verified) {
-            return res.status(400).json({
-                success: false,
-                message: "This verification link is invalid, expired, or already used."
+            return res.json({
+                success: true,
+                message: "Your email has been verified successfully! You can now log in."
             });
-        }
 
-        return res.json({
-            success: true,
-            message: "Your email has been verified successfully! You can now log in."
-        });
+        } catch (error) {
+            await client.query("ROLLBACK");
+            throw error;
+        } finally {
+            client.release();
+        }
 
     } catch (error) {
         console.error("[EMAIL VERIFICATION ERROR]", error);
@@ -303,17 +346,31 @@ app.get("/api/auth/verify-email", (req, res) => {
         });
     }
 });
+
 // LOGIN
 app.post("/api/auth/login", async (req, res) => {
     try {
-        const rawEmailInput = typeof req.body.email === "string" ? req.body.email : "";
-        const rawPhoneInput = typeof req.body.phonenumber === "string" ? req.body.phonenumber : "";
-        const legacyIdentifier = typeof req.body.identifier === "string" ? req.body.identifier : "";
-        const rawEmail = rawEmailInput || (legacyIdentifier.includes("@") ? legacyIdentifier : "");
-        const rawPhone = rawPhoneInput || (!legacyIdentifier.includes("@") ? legacyIdentifier : "");
+        const rawEmailInput =
+            typeof req.body.email === "string" ? req.body.email : "";
+
+        const rawPhoneInput =
+            typeof req.body.phonenumber === "string"
+                ? req.body.phonenumber : "";
+
+        const legacyIdentifier =
+            typeof req.body.identifier === "string"
+                ? req.body.identifier : "";
+
+        const rawEmail = rawEmailInput ||
+            (legacyIdentifier.includes("@") ? legacyIdentifier : "");
+
+        const rawPhone = rawPhoneInput ||
+            (!legacyIdentifier.includes("@") ? legacyIdentifier : "");
+
         const { password } = req.body;
 
-        if (typeof password !== "string" || (!rawEmail && !rawPhone)) {
+        if (typeof password !== "string" ||
+            (!rawEmail && !rawPhone)) {
             return res.status(400).json({
                 message: "Phone number or email and password are required."
             });
@@ -322,26 +379,29 @@ app.post("/api/auth/login", async (req, res) => {
         const cleanEmail = rawEmail.trim().toLowerCase();
         const cleanPhone = rawPhone.trim();
 
-        const user = db.prepare(
-            "SELECT * FROM users WHERE phonenumber = ? OR email = ?"
-        ).get(cleanPhone || "", cleanEmail || "");
+        const result = await db.query(`
+            SELECT * FROM users
+            WHERE (phonenumber = $1 AND $1 <> '')
+               OR (email = $2 AND $2 <> '')
+            LIMIT 1
+        `, [cleanPhone, cleanEmail]);
 
-        if (
-            !user ||
-            !(await bcrypt.compare(password, user.password))
-        ) {
+        const user = result.rows[0];
+
+        if (!user || !(await bcrypt.compare(password, user.password))) {
             return res.status(401).json({
                 message: "Invalid email or password."
             });
         }
-// Prevent users with unverified email addresses from logging in.
-if (user.email && user.is_verified !== 1) {
-    return res.status(403).json({
-        success: false,
-        requiresVerification: true,
-        message: "Please verify your email address before logging in."
-    });
-}
+
+        if (user.email && user.is_verified !== 1) {
+            return res.status(403).json({
+                success: false,
+                requiresVerification: true,
+                message: "Please verify your email address before logging in."
+            });
+        }
+
         const token = createToken(user);
 
         return res.json({
@@ -356,7 +416,7 @@ if (user.email && user.is_verified !== 1) {
         });
 
     } catch (error) {
-        console.error("Login error:", error.message);
+        console.error("[LOGIN ERROR]", error);
 
         return res.status(500).json({
             message: "An unexpected server error occurred."
@@ -365,30 +425,34 @@ if (user.email && user.is_verified !== 1) {
 });
 
 // GET CURRENT USER
-app.get("/api/auth/me", authenticateToken, (req, res) => {
-    const user = db.prepare(`
-        SELECT id, name, email, phonenumber, created_at
-        FROM users
-        WHERE id = ?
-    `).get(req.user.id);
+app.get("/api/auth/me", authenticateToken, async (req, res) => {
+    try {
+        const result = await db.query(`
+            SELECT id, name, email, phonenumber, created_at
+            FROM users
+            WHERE id = $1
+        `, [req.user.id]);
 
-    if (!user) {
-        return res.status(404).json({
-            message: "User not found."
+        const user = result.rows[0];
+
+        if (!user) {
+            return res.status(404).json({
+                message: "User not found."
+            });
+        }
+
+        return res.json({ user });
+
+    } catch (error) {
+        console.error("[CURRENT USER ERROR]", error);
+
+        return res.status(500).json({
+            message: "Unable to retrieve user."
         });
     }
+});
 
-    return res.json({ user });
-});
-const transporter = nodemailer.createTransport({
-  host: process.env.EMAIL_HOST,
-  port: Number(process.env.EMAIL_PORT || 465),
-  secure: process.env.EMAIL_SECURE === "true",
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASSWORD
-  }
-});
+// FORGOT PASSWORD
 app.post("/api/auth/forgot-password", async (req, res) => {
     const genericMessage =
         "If an account exists for that email, reset instructions will be sent.";
@@ -400,25 +464,26 @@ app.post("/api/auth/forgot-password", async (req, res) => {
             return res.status(200).json({ message: genericMessage });
         }
 
-        const user = db.prepare(
-            "SELECT id, email FROM users WHERE email = ?"
-        ).get(email.trim().toLowerCase());
+        const result = await db.query(`
+            SELECT id, email
+            FROM users
+            WHERE email = $1
+        `, [email.trim().toLowerCase()]);
+
+        const user = result.rows[0];
 
         if (!user) {
             return res.status(200).json({ message: genericMessage });
         }
 
-        // Invalidate previous unused reset links for this user.
-        db.prepare(`
+        await db.query(`
             UPDATE password_resets
             SET used = 1
-            WHERE user_id = ? AND used = 0
-        `).run(user.id);
+            WHERE user_id = $1 AND used = 0
+        `, [user.id]);
 
-        // Generate a cryptographically random reset token.
         const token = crypto.randomBytes(32).toString("hex");
 
-        // Store only the hash of the token.
         const tokenHash = crypto
             .createHash("sha256")
             .update(token)
@@ -426,11 +491,11 @@ app.post("/api/auth/forgot-password", async (req, res) => {
 
         const expiresAt = Date.now() + 15 * 60 * 1000;
 
-        db.prepare(`
+        await db.query(`
             INSERT INTO password_resets
                 (user_id, token_hash, expires_at)
-            VALUES (?, ?, ?)
-        `).run(user.id, tokenHash, expiresAt);
+            VALUES ($1, $2, $3)
+        `, [user.id, tokenHash, expiresAt]);
 
         const resetLink =
             `${process.env.FRONTEND_URL}/reset-password?token=${token}`;
@@ -442,17 +507,23 @@ app.post("/api/auth/forgot-password", async (req, res) => {
             text: `Use this link to reset your password within 15 minutes:\n\n${resetLink}\n\nIf you did not request this, ignore this email.`
         });
 
-        return res.status(200).json({ message: genericMessage });
+        return res.status(200).json({
+            message: genericMessage
+        });
 
     } catch (error) {
-        console.error("Password-reset request failed:", error.message);
+        console.error("[FORGOT PASSWORD ERROR]", error);
 
         return res.status(500).json({
             message: "Unable to process the request right now."
         });
     }
 });
+
+// RESET PASSWORD
 app.post("/api/auth/reset-password", async (req, res) => {
+    const client = await db.connect();
+
     try {
         const { token, password } = req.body;
 
@@ -473,129 +544,145 @@ app.post("/api/auth/reset-password", async (req, res) => {
             .update(token)
             .digest("hex");
 
-        const reset = db.prepare(`
-            SELECT id, user_id
-            FROM password_resets
-            WHERE token_hash = ?
-              AND used = 0
-              AND expires_at > ?
-        `).get(tokenHash, Date.now());
-
-        if (!reset) {
-            return res.status(400).json({
-                message: "The reset link is invalid or has expired."
-            });
-        }
-
         const hashedPassword = await bcrypt.hash(password, 12);
 
-        // Consume the token and change the password atomically.
-        const updatePassword = db.transaction(() => {
-            const result = db.prepare(`
-                UPDATE password_resets
-                SET used = 1
-                WHERE id = ?
-                  AND used = 0
-                  AND expires_at > ?
-            `).run(reset.id, Date.now());
+        await client.query("BEGIN");
 
-            if (result.changes !== 1) {
-                return false;
-            }
+        const resetResult = await client.query(`
+            SELECT id, user_id
+            FROM password_resets
+            WHERE token_hash = $1
+              AND used = 0
+              AND expires_at > $2
+            FOR UPDATE
+        `, [tokenHash, Date.now()]);
 
-            db.prepare(`
-                UPDATE users
-                SET password = ?
-                WHERE id = ?
-            `).run(hashedPassword, reset.user_id);
+        const reset = resetResult.rows[0];
 
-            // Invalidate other outstanding reset links.
-            db.prepare(`
-                UPDATE password_resets
-                SET used = 1
-                WHERE user_id = ?
-            `).run(reset.user_id);
+        if (!reset) {
+            await client.query("ROLLBACK");
 
-            return true;
-        });
-
-        if (!updatePassword()) {
             return res.status(400).json({
                 message: "The reset link is invalid or has expired."
             });
         }
+
+        await client.query(`
+            UPDATE password_resets
+            SET used = 1
+            WHERE id = $1
+        `, [reset.id]);
+
+        await client.query(`
+            UPDATE users
+            SET password = $1
+            WHERE id = $2
+        `, [hashedPassword, reset.user_id]);
+
+        await client.query(`
+            UPDATE password_resets
+            SET used = 1
+            WHERE user_id = $1
+        `, [reset.user_id]);
+
+        await client.query("COMMIT");
 
         return res.json({
             message: "Password reset successfully. Please sign in again."
         });
 
     } catch (error) {
-        console.error("Password reset failed:", error.message);
+        await client.query("ROLLBACK");
+
+        console.error("[RESET PASSWORD ERROR]", error);
 
         return res.status(500).json({
             message: "Unable to reset the password right now."
         });
+
+    } finally {
+        client.release();
     }
 });
 
-app.get("/api/messages", authenticateToken, (req, res) => {
-  try {
-    const messages = db.prepare(`
-      SELECT id, user_id, message, created_at
-      FROM messages
-      WHERE user_id = ?
-      ORDER BY created_at DESC, id DESC
-    `).all(req.user.id);
+// GET MESSAGES
+app.get("/api/messages", authenticateToken, async (req, res) => {
+    try {
+        const result = await db.query(`
+            SELECT id, user_id, message, created_at
+            FROM messages
+            WHERE user_id = $1
+            ORDER BY created_at DESC, id DESC
+        `, [req.user.id]);
 
-    return res.json({ messages });
-  } catch (error) {
-    console.error("Error fetching messages:", error);
-    return res.status(500).json({
-      message: "Unable to load messages right now."
-    });
-  }
-});
+        return res.json({
+            messages: result.rows
+        });
 
-app.post("/api/messages", authenticateToken, (req, res) => {
-  try {
-    const { message } = req.body;
+    } catch (error) {
+        console.error("[GET MESSAGES ERROR]", error);
 
-    if (typeof message !== "string" || !message.trim()) {
-      return res.status(400).json({
-        message: "Please enter a message."
-      });
+        return res.status(500).json({
+            message: "Unable to load messages right now."
+        });
     }
+});
 
-    const user = db.prepare(`
-      SELECT id
-      FROM users
-      WHERE id = ?
-    `).get(req.user.id);
+// SAVE MESSAGE
+app.post("/api/messages", authenticateToken, async (req, res) => {
+    try {
+        const { message } = req.body;
 
-    if (!user) {
-      return res.status(401).json({
-        message: "Your session is no longer valid. Please sign in again."
-      });
+        if (typeof message !== "string" || !message.trim()) {
+            return res.status(400).json({
+                message: "Please enter a message."
+            });
+        }
+
+        const user = await db.query(`
+            SELECT id FROM users
+            WHERE id = $1
+        `, [req.user.id]);
+
+        if (user.rows.length === 0) {
+            return res.status(401).json({
+                message: "Your session is no longer valid. Please sign in again."
+            });
+        }
+
+        const result = await db.query(`
+            INSERT INTO messages (user_id, message)
+            VALUES ($1, $2)
+            RETURNING id
+        `, [req.user.id, message.trim()]);
+
+        return res.status(201).json({
+            message: "Message saved.",
+            id: result.rows[0].id
+        });
+
+    } catch (error) {
+        console.error("[SAVE MESSAGE ERROR]", error);
+
+        return res.status(500).json({
+            message: "Unable to save message."
+        });
     }
-
-    const result = db.prepare(`
-      INSERT INTO messages (user_id, message)
-      VALUES (?, ?)
-    `).run(user.id, message.trim());
-
-    res.status(201).json({
-      message: "Message saved.",
-      id: result.lastInsertRowid
-    });
-  } catch (error) {
-    console.error("Error saving message:", error);
-
-    res.status(500).json({
-      message: "loading"
-    });
-  }
 });
-// Start server
-app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Backend running on port ${PORT}`);
-});
+
+// START SERVER AFTER DATABASE INITIALIZATION
+async function startServer() {
+    try {
+        await initDb();
+
+        app.listen(PORT, "0.0.0.0", () => {
+            console.log(`Backend running on port ${PORT}`);
+        });
+
+    } catch (error) {
+        console.error("Database initialization failed:", error);
+        process.exit(1);
+    }
+}
+
+startServer();

@@ -1,4 +1,3 @@
-
 const crypto = require("crypto");
 const nodemailer = require("nodemailer");
 const path = require("path");
@@ -38,8 +37,30 @@ const allowedOrigins = (
         .map(origin => origin.trim().replace(/\/+$/, ""))
 );
 
+const allowedOriginSet = new Set(allowedOrigins);
+
 app.use(cors({
-    origin: allowedOrigins,
+    origin(origin, callback) {
+        if (!origin) {
+            return callback(null, true);
+        }
+
+        let normalizedOrigin;
+        try {
+            normalizedOrigin = new URL(origin).origin;
+        } catch {
+            return callback(new Error("Invalid CORS origin."));
+        }
+
+        const isLocalOrigin = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(normalizedOrigin);
+        const isDevTunnelOrigin = /^https:\/\/[^/]+\.devtunnels\.ms$/i.test(normalizedOrigin);
+
+        if (allowedOriginSet.has(normalizedOrigin) || isLocalOrigin || isDevTunnelOrigin) {
+            callback(null, true);
+        } else {
+            callback(new Error("Origin is not allowed by CORS."));
+        }
+    },
     credentials: true
 }));
 app.use(express.json({ limit: "10kb" }));
